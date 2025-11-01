@@ -1,0 +1,64 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // users: Allow unauthenticated, limited queries for sign-up check
+    match /users/{userId} {
+      // 'get': Only authenticated users can look up other users by ID.
+      allow get: if request.auth != null;
+      
+      // 'list': Allow *anyone* to query, BUT only if
+      // the query requests 10 or fewer documents.
+      // This allows our `limit(1)` (username check) and
+      // `limit(5)` (user search) queries to work.
+      allow list: if request.query.limit <= 10;
+
+      // 'create': Allow when the user is creating their *own* doc.
+      allow create: if request.auth.uid == userId;
+                       
+      // 'update': Allow when a user is updating their *own* doc.
+      allow update: if request.auth.uid == userId;
+      
+      // 'delete': Never allow.
+      allow delete: if false;
+    }
+
+
+    // keyVaults: Only the owner can access their own vault
+    match /keyVaults/{userId} {
+      allow read, update, create: if request.auth.uid == userId;
+    }
+
+    // chats: This block contains the critical fix
+    match /chats/{chatId} {
+
+      // 'get' (reading a single doc) is allowed if:
+      // 1. The doc doesn't exist (for our 'check-if-exists' query)
+      // 2. The doc *does* exist AND you are a participant.
+      allow get: if resource == null || (request.auth.uid in resource.data.users);
+
+      // 'list' (querying) is allowed if:
+      // The user is a participant in the chat document.
+      // This rule is checked against every doc found by your query.
+      allow list: if request.auth.uid in resource.data.users;
+
+      // 'create' is allowed if you are in the 'users' array of the new doc.
+      allow create: if request.auth.uid in request.resource.data.users;
+      
+      // 'update' is allowed if you are in the 'users' array of the existing doc.
+      allow update: if request.auth.uid in resource.data.users;
+
+      // --- messages (subcollection) ---
+      match /messages/{messageId} {
+        
+        // You can read messages if you are a participant in the parent chat.
+        allow read: if request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.users;
+
+        // You can create a message if you are a participant AND you are the sender.
+        allow create: if (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.users)
+                       && (request.auth.uid == request.resource.data.senderId);
+      }
+    }
+  }
+}
