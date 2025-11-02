@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  /* This is the new default (Light Mode)
+    BG is light-grey, text is black/night
+  */
+  @apply bg-grey-light text-night;
+
+  /* This is the Dark Mode
+    When <html> has 'dark' class, these styles apply
+  */
+  @apply dark:bg-night dark:text-grey-light;
+
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
