@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom'; // 1. useNavigate is GONE
+import { Link, useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { Input } from '../components/core/Input';
 import { Button } from '../components/core/Button';
@@ -7,29 +7,28 @@ import { getFriendlyErrorMessage } from '../lib/errors';
 import { db, auth } from '../lib/firebase';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { fetchSignInMethodsForEmail } from 'firebase/auth';
+import { LoadingSpinner } from '../components/core/LoadingSpinner';
 
-// A simple regex for email format
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-// Define status types for BOTH fields
 type FieldStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid_format';
 
 const SignUp: React.FC = () => {
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [duressPassword, setDuressPassword] = useState(''); // <-- NEW STATE: Duress Password
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false); // This is for FORM submission
+  const [loading, setLoading] = useState(false); 
 
   const [usernameStatus, setUsernameStatus] = useState<FieldStatus>('idle');
   const [isCheckingUsername, setIsCheckingUsername] = useState(false);
   const [emailStatus, setEmailStatus] = useState<FieldStatus>('idle');
   const [isCheckingEmail, setIsCheckingEmail] = useState(false);
 
-  const { signup } = useAuth();
-  // const navigate = useNavigate(); // 2. This line is GONE
+  const { signup, isVaultUnlocked, loading: authLoading } = useAuth();
+  const navigate = useNavigate();
 
-  // USERNAME CHECK EFFECT
+  // --- USERNAME CHECK EFFECT ---
   useEffect(() => {
     if (username.length < 3) {
       setUsernameStatus('idle');
@@ -48,7 +47,7 @@ const SignUp: React.FC = () => {
     return () => clearTimeout(debouncedCheck);
   }, [username]);
 
-  // EMAIL CHECK EFFECT
+  // --- EMAIL CHECK EFFECT ---
   useEffect(() => {
     if (email.length === 0) {
       setEmailStatus('idle');
@@ -58,7 +57,6 @@ const SignUp: React.FC = () => {
       setEmailStatus('invalid_format');
       return;
     }
-
     setIsCheckingEmail(true);
     setEmailStatus('checking');
     const debouncedCheck = setTimeout(async () => {
@@ -75,7 +73,6 @@ const SignUp: React.FC = () => {
       }
       setIsCheckingEmail(false);
     }, 500);
-
     return () => clearTimeout(debouncedCheck);
   }, [email]);
 
@@ -84,6 +81,7 @@ const SignUp: React.FC = () => {
     e.preventDefault();
     setError('');
 
+    // --- Core Validation ---
     if (password.length < 8) {
       setError("Password must be at least 8 characters");
       return;
@@ -96,12 +94,22 @@ const SignUp: React.FC = () => {
       setError("Please use an available, valid email.");
       return;
     }
+    // --- Duress Validation ---
+    if (duressPassword.length > 0 && duressPassword.length < 4) {
+        setError("Duress password must be at least 4 characters.");
+        return;
+    }
+    if (duressPassword.length > 0 && duressPassword === password) {
+        setError("Duress password cannot be the same as your main password.");
+        return;
+    }
 
     setLoading(true);
     try {
-      await signup(email, password, username);
-      // 3. The `Maps('/')` call is GONE.
-      // The router will now handle the redirect automatically.
+      // CRITICAL: Pass the duressPassword to the signup function
+      await signup(email, password, username, duressPassword);
+      // Navigate to trigger ProtectedRoute logic
+      navigate('/');
     } catch (err: any) {
       console.error(err);
       setError(getFriendlyErrorMessage(err));
@@ -110,7 +118,7 @@ const SignUp: React.FC = () => {
     }
   };
 
-  // HELPER to render username status
+  // --- Render Helpers ---
   const renderUsernameStatus = () => {
     switch (usernameStatus) {
       case 'checking':
@@ -127,8 +135,6 @@ const SignUp: React.FC = () => {
         return <div className="h-5" />;
     }
   };
-
-  // HELPER to render email status
   const renderEmailStatus = () => {
     switch (emailStatus) {
       case 'checking':
@@ -145,68 +151,103 @@ const SignUp: React.FC = () => {
     }
   };
 
-  // CALCULATE if the button should be disabled
   const isButtonDisabled = 
     loading || 
     isCheckingUsername || 
     isCheckingEmail ||
     usernameStatus !== 'available' || 
     emailStatus !== 'available' ||
-    password.length < 8;
+    password.length < 8 ||
+    (duressPassword.length > 0 && duressPassword.length < 4) ||
+    (duressPassword === password); // Disable if duress matches main password
+
+
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-grey-light dark:bg-pure-black">
+        <LoadingSpinner />
+      </div>
+    );
+  }
+
+  if (isVaultUnlocked) {
+    return <Navigate to="/" replace />;
+  }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <Input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-        <div className="mt-1 pl-1 h-5">
-          {renderEmailStatus()}
-        </div>
-      </div>
-      
-      <div>
-        <Input
-          type="text"
-          placeholder="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          required
-        />
-        <div className="mt-1 pl-1 h-5">
-          {renderUsernameStatus()}
-        </div>
-      </div>
+    <div className="flex items-center justify-center min-h-screen bg-grey-light dark:bg-pure-black">
+      <div className="w-full max-w-md p-8 bg-pure-white dark:bg-night rounded-lg shadow-xl">
+        <h1 className="text-4xl font-bold text-center text-night dark:text-pure-white mb-8">
+          PHOTON
+        </h1>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <Input
+              type="email"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+            <div className="mt-1 pl-1 h-5">
+              {renderEmailStatus()}
+            </div>
+          </div>
+          
+          <div>
+            <Input
+              type="text"
+              placeholder="Username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
+            />
+            <div className="mt-1 pl-1 h-5">
+              {renderUsernameStatus()}
+            </div>
+          </div>
 
-      <Input
-        type="password"
-        placeholder="Password (min 8 characters)"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        required
-      />
-      
-      {error && <p className="text-red-500 text-sm">{error}</p>}
-      
-      <Button 
-        type="submit" 
-        isLoading={loading} 
-        disabled={isButtonDisabled}
-      >
-        {isCheckingUsername || isCheckingEmail ? 'Validating...' : 'Create & Secure Vault'}
-      </Button>
-      
-      <p className="text-center text-grey-dark dark:text-grey-mid">
-        Already have an account?{' '}
-        <Link to="/login" className="text-night dark:text-pure-white hover:underline">
-          Log in
-        </Link>
-      </p>
-    </form>
+          <Input
+            type="password"
+            placeholder="Password (min 8 characters)"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+          
+          {/* --- NEW DURESS PASSWORD FIELD --- */}
+          <div>
+            <Input
+              type="password"
+              placeholder="Duress Password (Optional: Min 4 chars)"
+              value={duressPassword}
+              onChange={(e) => setDuressPassword(e.target.value)}
+            />
+            <p className="text-xs text-grey-mid mt-1 pl-1">
+              Use a *different* password to open an empty decoy vault.
+            </p>
+          </div>
+          {/* --- END NEW DURESS PASSWORD FIELD --- */}
+
+          {error && <p className="text-red-500 text-sm">{error}</p>}
+          
+          <Button 
+            type="submit" 
+            isLoading={loading} 
+            disabled={isButtonDisabled}
+          >
+            {isCheckingUsername || isCheckingEmail ? 'Validating...' : 'Create & Secure Vault'}
+          </Button>
+          
+          <p className="text-center text-grey-dark dark:text-grey-mid">
+            Already have an account?{' '}
+            <Link to="/login" className="text-night dark:text-pure-white hover:underline">
+              Log in
+            </Link>
+          </p>
+        </form>
+      </div>
+    </div>
   );
 };
 
